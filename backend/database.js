@@ -1,45 +1,29 @@
-const path = require('path');
-const fs = require('fs');
-const initSqlJs = require('sql.js');
+const { createClient } = require('@libsql/client');
 
-const DB_PATH = path.join(__dirname, 'techxconf.db');
+let client = null;
 
-let db = null;
-let SQL = null;
+function getClient() {
+  if (client) return client;
 
-// Persist the in-memory database to disk
-function persist() {
-  if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
+  // Turso cloud: set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN env vars
+  // Local dev fallback: uses a local SQLite file via libsql
+  const url = process.env.TURSO_DATABASE_URL || 'file:techxconf.db';
+  const authToken = process.env.TURSO_AUTH_TOKEN || undefined;
+
+  client = createClient({ url, authToken });
+  return client;
 }
 
 async function getDb() {
-  if (db) return db;
-
-  SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  initializeSchema();
-  persist(); // save initial schema
-  return db;
+  const c = getClient();
+  await initializeSchema(c);
+  return c;
 }
 
-// Wrap sql.js API to match better-sqlite3-style synchronous usage
-// sql.js uses run/exec differently, so we add helpers
-function execDb(database, sql) {
-  database.run(sql);
-}
-
-function initializeSchema() {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
+async function initializeSchema(c) {
+  // Run all DDL as a batch — idempotent via IF NOT EXISTS
+  await c.batch([
+    `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
@@ -47,11 +31,8 @@ function initializeSchema() {
       experience_years INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS assessments (
+    )`,
+    `CREATE TABLE IF NOT EXISTS assessments (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       answers TEXT NOT NULL,
@@ -62,22 +43,16 @@ function initializeSchema() {
       observability_score REAL DEFAULT 0,
       harness_pipeline_fit REAL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS skills (
+    )`,
+    `CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       skill_name TEXT NOT NULL,
       proficiency INTEGER DEFAULT 1,
       category TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sessions (
+    )`,
+    `CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       track TEXT NOT NULL,
       time_ist TEXT,
@@ -86,21 +61,15 @@ function initializeSchema() {
       role_relevance TEXT,
       career_tags TEXT,
       skill_level TEXT DEFAULT 'intermediate'
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS bookmarks (
+    )`,
+    `CREATE TABLE IF NOT EXISTS bookmarks (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, session_id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS observability_logs (
+    )`,
+    `CREATE TABLE IF NOT EXISTS observability_logs (
       id TEXT PRIMARY KEY,
       user_id TEXT,
       event_type TEXT NOT NULL,
@@ -109,16 +78,20 @@ function initializeSchema() {
       guardrail_reason TEXT,
       response_time_ms INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    )`,
+  ], 'deferred');
 
-  seedSessions();
+  await seedSessions(c);
 }
 
-function seedSessions() {
-  const result = db.exec('SELECT COUNT(*) as c FROM sessions');
-  const count = result[0]?.values[0][0] || 0;
-  if (count > 0) return;
+// Cache flag so we only check once per process
+let seeded = false;
+
+async function seedSessions(c) {
+  if (seeded) return;
+  const rs = await c.execute('SELECT COUNT(*) AS cnt FROM sessions');
+  const count = Number(rs.rows[0].cnt || 0);
+  if (count > 0) { seeded = true; return; }
 
   const sessions = [
     ['s01','Industry & Innovation','10:40-11:20','7 Missing Links of AI-Native Software Delivery','Karthikeyan VK','AI-native software delivery and engineering practices.','["AI","DevOps","Software Engineering","Platform"]','intermediate'],
@@ -143,44 +116,38 @@ function seedSessions() {
     ['s20','Cloud, DevOps & FinOps','16:00-16:45','The Machine-Readable Enterprise: Engineering the Context Layer','Vennila Shanmugam; Charan Panthagi','Enterprise context and structured information for AI-enabled systems.','["Enterprise AI","Data Architecture","Machine Learning"]','advanced'],
     ['s21','Data & Observability','10:40-11:20','Trust, But Verify: Building a Provenance Layer for AI Banking','Bhanga Amary','Data provenance, traceability, trust and governance for enterprise AI.','["Data Governance","AI Trust","Provenance","Banking"]','advanced'],
     ['s22','Data & Observability','11:25-12:05','Architecting Enterprise Data Platforms for Reliable AI Systems','Harun Razeed Basheer','Reliable data foundations and architecture for AI-enabled systems.','["Data Platform","Data Engineering","AI","Architecture"]','advanced'],
-    ['s23','Data & Observability','12:10-12:55','Harnessing the Power of Open Source Tool in Automating Data Quality Controls','Rohith Ram Prabhakaran','Data-quality automation; overlaps with AI workflow sessions.','["Data Quality","Open Source","Automation","Harness"]','intermediate'],
+    ['s23','Data & Observability','12:10-12:55','Harnessing the Power of Open Source Tool in Automating Data Quality Controls','Rohith Ram Prabhakaran','Data-quality automation.','["Data Quality","Open Source","Automation","Harness"]','intermediate'],
     ['s24','Data & Observability','13:30-15:10','The Hidden Cost of "Just Ship It": What Happens After Production?','Srinidhi Loganathan; Sahithya B A','Production operations, reliability and the cost of post-release issues.','["Production","Reliability","SRE","Cost","Post-Release"]','intermediate'],
-    ['s25','Data & Observability','15:15-15:55','Activation Sorcery Transduction - A New Approach to AI Model Safety','Vinoj Sharma','AI model safety; overlaps with the Cloud-platform-engineering session.','["AI Safety","Model Safety","MLOps","Guardrails"]','advanced'],
+    ['s25','Data & Observability','15:15-15:55','Activation Sorcery Transduction - A New Approach to AI Model Safety','Vinoj Sharma','AI model safety.','["AI Safety","Model Safety","MLOps","Guardrails"]','advanced'],
     ['s26','Data & Observability','16:00-16:20','Strengthen Guardrails: How LLM Observability','Dayadevi Karunanidhi','LLM monitoring, behavior visibility and safety guardrails.','["Observability","LLM","Guardrails","Monitoring","Harness"]','advanced'],
     ['s27','Data & Observability','16:25-16:45','Microsoft Fabric: From Data to Intelligence — Shaping the Modern Data Platform','Aravindh Kumar V; Aswathi','Modern data-platform architecture and analytics foundations.','["Microsoft Fabric","Data Platform","Analytics","BI"]','intermediate'],
   ];
 
-  for (const s of sessions) {
-    db.run(
-      `INSERT OR IGNORE INTO sessions (id, track, time_ist, title, speakers, role_relevance, career_tags, skill_level)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      s
-    );
-  }
+  const sql = `INSERT OR IGNORE INTO sessions (id, track, time_ist, title, speakers, role_relevance, career_tags, skill_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  await c.batch(
+    sessions.map(args => ({ sql, args })),
+    'deferred'
+  );
+  seeded = true;
 }
 
-// Helper: run a SELECT and return array of row objects
-function queryAll(database, sql, params = []) {
-  const stmt = database.prepare(sql);
-  const rows = [];
-  stmt.bind(params);
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return rows;
+// ─── Query helpers ────────────────────────────────────────────────────────────
+
+async function queryAll(sql, params = []) {
+  const c = getClient();
+  const rs = await c.execute({ sql, args: params });
+  return rs.rows;
 }
 
-// Helper: run a SELECT and return single row object or null
-function queryOne(database, sql, params = []) {
-  const rows = queryAll(database, sql, params);
-  return rows.length > 0 ? rows[0] : null;
+async function queryOne(sql, params = []) {
+  const c = getClient();
+  const rs = await c.execute({ sql, args: params });
+  return rs.rows[0] ?? null;
 }
 
-// Helper: run INSERT/UPDATE/DELETE
-function runQuery(database, sql, params = []) {
-  database.run(sql, params);
-  persist();
+async function runQuery(sql, params = []) {
+  const c = getClient();
+  return await c.execute({ sql, args: params });
 }
 
-module.exports = { getDb, queryAll, queryOne, runQuery, persist };
+module.exports = { getDb, queryAll, queryOne, runQuery };

@@ -12,12 +12,12 @@ router.post('/', async (req, res) => {
 
   const start = Date.now();
   try {
-    const db = await getDb();
-    const allSessions = queryAll(db, 'SELECT * FROM sessions');
-    const user = queryOne(db, 'SELECT * FROM users WHERE id = ?', [user_id]);
+    await getDb();
+    const allSessions = await queryAll('SELECT * FROM sessions');
+    const user = await queryOne('SELECT * FROM users WHERE id = ?', [user_id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const dbSkills = queryAll(db, 'SELECT skill_name FROM skills WHERE user_id = ?', [user_id]);
+    const dbSkills = await queryAll('SELECT skill_name FROM skills WHERE user_id = ?', [user_id]);
     const skillNames = [...(answers.skills || []), ...dbSkills.map(s => s.skill_name)];
 
     const enrichedAnswers = {
@@ -39,9 +39,10 @@ router.post('/', async (req, res) => {
     const guardrailResult = runGuardrails(guardrailInput);
 
     const id = uuidv4();
-    runQuery(db,
+    await runQuery(
       `INSERT INTO assessments
-        (id, user_id, answers, track_scores, recommended_track, recommended_sessions, guardrail_flags, observability_score, harness_pipeline_fit)
+        (id, user_id, answers, track_scores, recommended_track, recommended_sessions,
+         guardrail_flags, observability_score, harness_pipeline_fit)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, user_id,
@@ -55,16 +56,16 @@ router.post('/', async (req, res) => {
       ]
     );
 
-    const responseTime = Date.now() - start;
-    runQuery(db,
-      `INSERT INTO observability_logs (id, user_id, event_type, payload, guardrail_triggered, guardrail_reason, response_time_ms)
+    await runQuery(
+      `INSERT INTO observability_logs
+        (id, user_id, event_type, payload, guardrail_triggered, guardrail_reason, response_time_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         uuidv4(), user_id, 'assessment_completed',
         JSON.stringify({ track: plan.recommended_track, session_count: plan.recommended_sessions.length }),
         guardrailResult.guardrail_flags.length > 0 ? 1 : 0,
         guardrailResult.guardrail_flags.map(f => f.rule_name).join(', ') || null,
-        responseTime,
+        Date.now() - start,
       ]
     );
 
@@ -80,30 +81,35 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Assessment error:', err);
-    res.status(500).json({ error: 'Assessment processing failed: ' + err.message });
+    res.status(500).json({ error: 'Assessment failed: ' + err.message });
   }
 });
 
 // GET /api/assessments/:id
 router.get('/:id', async (req, res) => {
-  const db = await getDb();
-  const assessment = queryOne(db, 'SELECT * FROM assessments WHERE id = ?', [req.params.id]);
-  if (!assessment) return res.status(404).json({ error: 'Assessment not found' });
+  try {
+    await getDb();
+    const assessment = await queryOne('SELECT * FROM assessments WHERE id = ?', [req.params.id]);
+    if (!assessment) return res.status(404).json({ error: 'Assessment not found' });
 
-  const sessionIds = JSON.parse(assessment.recommended_sessions || '[]');
-  let sessions = [];
-  if (sessionIds.length > 0) {
-    const placeholders = sessionIds.map(() => '?').join(',');
-    sessions = queryAll(db, `SELECT * FROM sessions WHERE id IN (${placeholders})`, sessionIds);
+    const sessionIds = JSON.parse(assessment.recommended_sessions || '[]');
+    let sessions = [];
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map(() => '?').join(',');
+      sessions = await queryAll(`SELECT * FROM sessions WHERE id IN (${placeholders})`, sessionIds);
+    }
+
+    res.json({
+      ...assessment,
+      answers: JSON.parse(assessment.answers),
+      track_scores: JSON.parse(assessment.track_scores),
+      recommended_sessions: sessions,
+      guardrail_flags: JSON.parse(assessment.guardrail_flags || '[]'),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch assessment' });
   }
-
-  res.json({
-    ...assessment,
-    answers: JSON.parse(assessment.answers),
-    track_scores: JSON.parse(assessment.track_scores),
-    recommended_sessions: sessions,
-    guardrail_flags: JSON.parse(assessment.guardrail_flags || '[]'),
-  });
 });
 
 module.exports = router;
