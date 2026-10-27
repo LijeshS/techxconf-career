@@ -1,38 +1,41 @@
-const { createClient } = require('@libsql/client');
+const { neon } = require('@neondatabase/serverless');
 
-let client = null;
+let sql = null;
 
-function getClient() {
-  if (client) return client;
-
-  // Turso cloud: set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN env vars
-  // Local dev fallback: uses a local SQLite file via libsql
-  const url = process.env.TURSO_DATABASE_URL || 'file:techxconf.db';
-  const authToken = process.env.TURSO_AUTH_TOKEN || undefined;
-
-  client = createClient({ url, authToken });
-  return client;
+function getSql() {
+  if (sql) return sql;
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL environment variable is not set');
+  sql = neon(url);
+  return sql;
 }
+
+// Cache so schema+seed only runs once per process
+let initialized = false;
 
 async function getDb() {
-  const c = getClient();
-  await initializeSchema(c);
-  return c;
+  if (initialized) return getSql();
+  const db = getSql();
+  await initializeSchema(db);
+  initialized = true;
+  return db;
 }
 
-async function initializeSchema(c) {
-  // Run all DDL as a batch — idempotent via IF NOT EXISTS
-  await c.batch([
-    `CREATE TABLE IF NOT EXISTS users (
+async function initializeSchema(db) {
+  // All tables — idempotent
+  await db`
+    CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       current_role TEXT,
       experience_years INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS assessments (
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS assessments (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       answers TEXT NOT NULL,
@@ -42,17 +45,21 @@ async function initializeSchema(c) {
       guardrail_flags TEXT DEFAULT '[]',
       observability_score REAL DEFAULT 0,
       harness_pipeline_fit REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS skills (
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       skill_name TEXT NOT NULL,
       proficiency INTEGER DEFAULT 1,
       category TEXT,
-      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS sessions (
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       track TEXT NOT NULL,
       time_ist TEXT,
@@ -61,15 +68,19 @@ async function initializeSchema(c) {
       role_relevance TEXT,
       career_tags TEXT,
       skill_level TEXT DEFAULT 'intermediate'
-    )`,
-    `CREATE TABLE IF NOT EXISTS bookmarks (
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS bookmarks (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, session_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS observability_logs (
+    )
+  `;
+  await db`
+    CREATE TABLE IF NOT EXISTS observability_logs (
       id TEXT PRIMARY KEY,
       user_id TEXT,
       event_type TEXT NOT NULL,
@@ -77,21 +88,18 @@ async function initializeSchema(c) {
       guardrail_triggered INTEGER DEFAULT 0,
       guardrail_reason TEXT,
       response_time_ms INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-  ], 'deferred');
-
-  await seedSessions(c);
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await seedSessions(db);
 }
 
-// Cache flag so we only check once per process
 let seeded = false;
 
-async function seedSessions(c) {
+async function seedSessions(db) {
   if (seeded) return;
-  const rs = await c.execute('SELECT COUNT(*) AS cnt FROM sessions');
-  const count = Number(rs.rows[0].cnt || 0);
-  if (count > 0) { seeded = true; return; }
+  const [{ cnt }] = await db`SELECT COUNT(*)::int AS cnt FROM sessions`;
+  if (cnt > 0) { seeded = true; return; }
 
   const sessions = [
     ['s01','Industry & Innovation','10:40-11:20','7 Missing Links of AI-Native Software Delivery','Karthikeyan VK','AI-native software delivery and engineering practices.','["AI","DevOps","Software Engineering","Platform"]','intermediate'],
@@ -123,31 +131,35 @@ async function seedSessions(c) {
     ['s27','Data & Observability','16:25-16:45','Microsoft Fabric: From Data to Intelligence — Shaping the Modern Data Platform','Aravindh Kumar V; Aswathi','Modern data-platform architecture and analytics foundations.','["Microsoft Fabric","Data Platform","Analytics","BI"]','intermediate'],
   ];
 
-  const sql = `INSERT OR IGNORE INTO sessions (id, track, time_ist, title, speakers, role_relevance, career_tags, skill_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-  await c.batch(
-    sessions.map(args => ({ sql, args })),
-    'deferred'
-  );
+  for (const [id,track,time_ist,title,speakers,role_relevance,career_tags,skill_level] of sessions) {
+    await db`
+      INSERT INTO sessions (id, track, time_ist, title, speakers, role_relevance, career_tags, skill_level)
+      VALUES (${id}, ${track}, ${time_ist}, ${title}, ${speakers}, ${role_relevance}, ${career_tags}, ${skill_level})
+      ON CONFLICT (id) DO NOTHING
+    `;
+  }
   seeded = true;
+  console.log('✓ 27 conference sessions seeded');
 }
 
-// ─── Query helpers ────────────────────────────────────────────────────────────
+// ─── Query helpers ─────────────────────────────────────────────────────────────
+// Neon's tagged template literal is the query interface — helpers wrap it for
+// param-array style used throughout the routes.
 
-async function queryAll(sql, params = []) {
-  const c = getClient();
-  const rs = await c.execute({ sql, args: params });
-  return rs.rows;
+async function queryAll(sqlStr, params = []) {
+  const db = getSql();
+  // Build a tagged-template-style call from a plain string + params array
+  return await db(sqlStr, params);
 }
 
-async function queryOne(sql, params = []) {
-  const c = getClient();
-  const rs = await c.execute({ sql, args: params });
-  return rs.rows[0] ?? null;
+async function queryOne(sqlStr, params = []) {
+  const rows = await queryAll(sqlStr, params);
+  return rows[0] ?? null;
 }
 
-async function runQuery(sql, params = []) {
-  const c = getClient();
-  return await c.execute({ sql, args: params });
+async function runQuery(sqlStr, params = []) {
+  const db = getSql();
+  return await db(sqlStr, params);
 }
 
 module.exports = { getDb, queryAll, queryOne, runQuery };
