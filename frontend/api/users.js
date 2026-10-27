@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
 
     // POST /api/users
     if (req.method === 'POST') {
-      const { name, email, current_role, experience_years } = req.body;
+      const { name, email, user_role, experience_years } = req.body;
       if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) return res.status(400).json({ error: 'Invalid email' });
@@ -31,15 +31,15 @@ module.exports = async (req, res) => {
       if (existing[0]) return res.json({ user: existing[0], isNew: false });
 
       const uid = uuidv4();
-      await db`INSERT INTO users (id,name,email,current_role,experience_years) VALUES (${uid},${name},${email},${current_role||null},${experience_years||0})`;
+      await db`INSERT INTO users (id,name,email,user_role,experience_years) VALUES (${uid},${name},${email},${user_role||null},${experience_years||0})`;
       const user = (await db`SELECT * FROM users WHERE id = ${uid}`)[0];
       return res.status(201).json({ user, isNew: true });
     }
 
     // PUT /api/users?id=xxx
     if (req.method === 'PUT' && id) {
-      const { name, current_role, experience_years } = req.body;
-      await db`UPDATE users SET name=${name}, current_role=${current_role}, experience_years=${experience_years}, updated_at=NOW() WHERE id=${id}`;
+      const { name, user_role, experience_years } = req.body;
+      await db`UPDATE users SET name=${name}, user_role=${user_role}, experience_years=${experience_years}, updated_at=NOW() WHERE id=${id}`;
       const user = (await db`SELECT * FROM users WHERE id = ${id}`)[0];
       return res.json({ user });
     }

@@ -44,7 +44,7 @@ export default function Dashboard({ user }) {
           <div className="dash-avatar">{user.name?.charAt(0).toUpperCase()}</div>
           <div>
             <h1 className="section-title">Welcome back, {user.name?.split(' ')[0]}!</h1>
-            <p className="section-subtitle">{profile?.current_role || 'Professional'} · {profile?.experience_years || 0} years experience</p>
+            <p className="section-subtitle">{profile?.user_role || 'Professional'} · {profile?.experience_years || 0} years experience</p>
           </div>
         </div>
         <div className="dash-quick-actions">
@@ -139,7 +139,7 @@ export default function Dashboard({ user }) {
             <div className="profile-rows">
               <div className="profile-row"><span>Name</span><strong>{profile?.name}</strong></div>
               <div className="profile-row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{profile?.email}</strong></div>
-              <div className="profile-row"><span>Role</span><strong>{profile?.current_role || '—'}</strong></div>
+              <div className="profile-row"><span>Role</span><strong>{profile?.user_role || '—'}</strong></div>
               <div className="profile-row"><span>Experience</span><strong>{profile?.experience_years || 0} yrs</strong></div>
             </div>
           </div>

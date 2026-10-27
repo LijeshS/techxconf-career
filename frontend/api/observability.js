@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
       recent_logs: logs.map(l => ({ ...l, payload: JSON.parse(l.payload||'{}') })),
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error('observability error:', err);
+    res.status(500).json({ error: err.message || String(err) });
   }
 };

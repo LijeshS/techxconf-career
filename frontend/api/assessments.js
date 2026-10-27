@@ -170,7 +170,7 @@ module.exports = async (req, res) => {
       if (!users[0]) return res.status(404).json({ error: 'User not found' });
 
       const dbSkills = await db`SELECT skill_name FROM skills WHERE user_id = ${user_id}`;
-      const enriched = { ...answers, skills:[...(answers.skills||[]), ...dbSkills.map(s=>s.skill_name)], current_role: answers.current_role||users[0].current_role||'Software Engineer', experience_years: answers.experience_years??users[0].experience_years??0 };
+      const enriched = { ...answers, skills:[...(answers.skills||[]), ...dbSkills.map(s=>s.skill_name)], current_role: answers.current_role||users[0].user_role||'Software Engineer', experience_years: answers.experience_years??users[0].experience_years??0 };
 
       const allSessions = await db`SELECT * FROM sessions`;
       const plan = buildCareerPlan(enriched, allSessions);
@@ -186,7 +186,7 @@ module.exports = async (req, res) => {
 
     res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error('assessments error:', err);
+    res.status(500).json({ error: err.message || String(err) });
   }
 };

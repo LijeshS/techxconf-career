@@ -17,7 +17,7 @@ async function initDb() {
   if (initialized) return getDb();
   const db = getDb();
 
-  await db`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, current_role TEXT, experience_years INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`;
+  await db`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, user_role TEXT, experience_years INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`;
   await db`CREATE TABLE IF NOT EXISTS assessments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, answers TEXT NOT NULL, track_scores TEXT NOT NULL, recommended_track TEXT NOT NULL, recommended_sessions TEXT NOT NULL, guardrail_flags TEXT DEFAULT '[]', observability_score REAL DEFAULT 0, harness_pipeline_fit REAL DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`;
   await db`CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, skill_name TEXT NOT NULL, proficiency INTEGER DEFAULT 1, category TEXT, added_at TIMESTAMPTZ DEFAULT NOW())`;
   await db`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, track TEXT NOT NULL, time_ist TEXT, title TEXT NOT NULL, speakers TEXT, role_relevance TEXT, career_tags TEXT, skill_level TEXT DEFAULT 'intermediate')`;
