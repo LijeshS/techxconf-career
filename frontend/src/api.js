@@ -9,7 +9,15 @@ const api = axios.create({
 
 api.interceptors.response.use(
   r => r,
-  err => Promise.reject(new Error(err.response?.data?.error || err.message || 'Network error'))
+  err => {
+    const data = err.response?.data;
+    let msg;
+    if (typeof data === 'string') msg = data;
+    else if (data?.error) msg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+    else if (data?.message) msg = data.message;
+    else msg = err.message || 'Network error';
+    return Promise.reject(new Error(msg));
+  }
 );
 
 export const createUser = d => api.post('/users', d).then(r => r.data);

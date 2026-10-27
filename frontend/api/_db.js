@@ -5,7 +5,11 @@ let initialized = false;
 let seeded = false;
 
 function getDb() {
-  if (!sql) sql = neon(process.env.DATABASE_URL);
+  if (!sql) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error('DATABASE_URL is not configured');
+    sql = neon(url);
+  }
   return sql;
 }
 
