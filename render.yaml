@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: techxconf-career-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_P09xhXvWFnIf@ep-odd-tree-b5t0n8kv-pooler.c-7.us-east-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require
+      - key: FRONTEND_URL
+        value: https://frontend-nine-pi-sfkaoi506c.vercel.app
