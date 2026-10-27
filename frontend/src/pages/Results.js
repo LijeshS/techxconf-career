@@ -60,8 +60,10 @@ export default function Results({ user }) {
     career_roadmap = [],
     experience_level,
     guardrail_flags = [],
-    observability_score, harness_pipeline_fit, pipeline_status,
-  } = result;
+    observability_score = 0,
+    harness_pipeline_fit = 0,
+    pipeline_status = 'NEEDS_REVIEW',
+  } = result || {};
 
   const guardrails = { guardrail_flags, observability_score, harness_pipeline_fit, pipeline_status };
 

@@ -328,15 +328,21 @@ module.exports = async (req, res) => {
       const expLevel = storedAnswers.experience_years<2?'beginner':storedAnswers.experience_years<5?'intermediate':'advanced';
       const upskill_areas = UPSKILL_MAP[a.recommended_track]?.[expLevel] || UPSKILL_MAP[a.recommended_track]?.intermediate || [];
       const career_roadmap = ROADMAP_MAP[a.recommended_track]?.[expLevel]  || ROADMAP_MAP[a.recommended_track]?.intermediate  || [];
+
+      // Recompute guardrail pipeline_status from stored scores
+      const harness_pipeline_fit = a.harness_pipeline_fit || 0;
+      const pipeline_status = harness_pipeline_fit >= 75 ? 'PASSED' : harness_pipeline_fit >= 50 ? 'WARNINGS' : 'NEEDS_REVIEW';
+
       return res.json({
         ...a,
-        answers:storedAnswers,
-        track_scores:JSON.parse(a.track_scores),
-        recommended_sessions:sessions,
-        guardrail_flags:JSON.parse(a.guardrail_flags||'[]'),
+        answers: storedAnswers,
+        track_scores: JSON.parse(a.track_scores || '{}'),
+        recommended_sessions: sessions,
+        guardrail_flags: JSON.parse(a.guardrail_flags || '[]'),
         upskill_areas,
         career_roadmap,
-        experience_level:expLevel==='beginner'?'Beginner':expLevel==='intermediate'?'Mid-level':'Senior',
+        experience_level: expLevel==='beginner'?'Beginner':expLevel==='intermediate'?'Mid-level':'Senior',
+        pipeline_status,
       });
     }
 

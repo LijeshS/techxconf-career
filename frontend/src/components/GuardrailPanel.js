@@ -11,7 +11,7 @@ export default function GuardrailPanel({ guardrails }) {
 
   if (!guardrails) return null;
 
-  const { guardrail_flags = [], observability_score, harness_pipeline_fit, pipeline_status } = guardrails;
+  const { guardrail_flags = [], observability_score = 0, harness_pipeline_fit = 0, pipeline_status = 'NEEDS_REVIEW' } = guardrails;
   const hasFlags = guardrail_flags.length > 0;
 
   const pipelineColor = pipeline_status === 'PASSED' ? 'var(--harness-green)' : pipeline_status === 'WARNINGS' ? '#fbbf24' : '#f87171';
